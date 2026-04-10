@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use chiptool::commands::check::{check, Check};
+use chiptool::commands::check_compat::{check_compat, CheckCompat};
 use chiptool::commands::extract_all::{extract_all, ExtractAll};
 use chiptool::commands::extract_peripheral::{extract_peripheral, ExtractPeripheral};
 use chiptool::commands::fmt::{fmt, Fmt};
@@ -28,6 +29,7 @@ enum Subcommand {
     Check(Check),
     GenBlock(GenBlock),
     GenCommon(GenCommon),
+    CheckCompat(CheckCompat),
 }
 
 fn main() -> Result<()> {
@@ -44,5 +46,6 @@ fn main() -> Result<()> {
         Subcommand::Check(x) => check(x),
         Subcommand::GenBlock(x) => gen_block(x),
         Subcommand::GenCommon(x) => gen_common(x),
+        Subcommand::CheckCompat(x) => check_compat(x),
     }
 }

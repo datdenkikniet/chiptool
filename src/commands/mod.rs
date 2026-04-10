@@ -21,6 +21,7 @@ pub mod gen_block;
 pub mod gen_common;
 pub mod generate;
 pub mod transform;
+pub mod check_compat;
 
 /// Common arguments for all commands that perform code generation.
 #[derive(Parser)]
