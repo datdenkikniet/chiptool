@@ -234,6 +234,7 @@ macro_rules! transforms {
 }
 
 transforms!(
+    legacy_sanitize::LegacySanitize,
     sanitize::Sanitize,
     sort::Sort,
     add::Add,
