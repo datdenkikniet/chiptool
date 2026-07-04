@@ -134,7 +134,7 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
     };
 
     let gpio_name = format!("GPIO_{}_{}", gpio_block.to_uppercase(), num);
-    let daisy_ctl_prefix = format!("SELECT_{gpio_name}_ALT"); // Don't include trailing number in prefix
+    let daisy_ctl_prefix = &format!("SELECT_{gpio_name}_ALT"); // Don't include trailing number in prefix
 
     let mux_enum = ir.enums.get(&mux_enum_pattern).unwrap();
 
@@ -142,12 +142,17 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
     let enums_for_pad: Vec<_> = ir
         .enums
         .iter()
-        .filter_map(|(enum_name, enumm)| {
-            let enum_variant = enumm
-                .variants
-                .iter()
-                .find(|v| v.name.starts_with(&daisy_ctl_prefix))?;
-
+        // Assume that one daisy enum (= daisy mux) could route multiple
+        // altmodes for the same pad (though this doesn't appear to happen
+        // in practice)
+        .flat_map(|(enum_name, enumm)| {
+            enumm.variants.iter().filter_map(move |var| {
+                var.name
+                    .starts_with(daisy_ctl_prefix)
+                    .then_some((enum_name, var))
+            })
+        })
+        .filter_map(|(enum_name, enum_variant)| {
             let (fs_name, _) = ir
                 .fieldsets
                 .iter()
