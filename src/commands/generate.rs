@@ -99,37 +99,46 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
         return;
     };
 
-    let (iomuxc_block_path, iomuxc_block_name) = match instance.to_lowercase().as_str() {
-        "iomuxc" => ("iomuxc::Iomuxc", "IOMUXC"),
-        "iomuxc_aon" => ("iomuxc_aon::IomuxcAon", "IOMUXC_AON"),
-        _ => todo!(),
+    let block = |name: &str| {
+        let block = ir.blocks.get(name).unwrap();
+        block.items.iter().filter_map(|item| match &item.inner {
+            BlockItemInner::Register(register) => Some((&item.name, &register.fieldset)),
+            BlockItemInner::Block(_) => None,
+        })
     };
 
-    let iomuxc_block_name = Ident::new(iomuxc_block_name, Span::call_site());
-    let iomuxc_block = ir.blocks.get(iomuxc_block_path).unwrap();
+    let iomuxc = block("iomuxc::Iomuxc");
+    let iomuxc_aon = block("iomuxc_aon::IomuxcAon");
+
+    let (iomux_for_alt, iomux_for_alt_name) = match instance.to_lowercase().as_str() {
+        "iomuxc" => (iomuxc.clone(), "IOMUXC"),
+        "iomuxc_aon" => (iomuxc_aon.clone(), "IOMUXC_AON"),
+        _ => unimplemented!(),
+    };
+
+    let iomux_for_alt_name = Ident::new(iomux_for_alt_name, Span::call_site());
 
     let mux_enum_base_name = format!("{reg}MuxMode");
     let mux_enum_pattern = format!("{instance}::vals::{mux_enum_base_name}");
 
-    let (_, gpio_block) = struct_name.split_at(4);
+    let gpio_block_num = struct_name.strip_prefix("Gpio").unwrap();
 
-    let (gpio_block, num) = if gpio_block.starts_with("Aon") {
-        let (a, b) = gpio_block.split_at(3);
-        (a, b.to_string())
-    } else if gpio_block.starts_with("Emc") {
-        let (block, num) = gpio_block.split_at(3);
-        let (sub_block, num) = num.split_at(2);
-        (block, format!("{sub_block}_{num}"))
+    let (gpio_block, num) = if let Some(num) = gpio_block_num.strip_prefix("Aon") {
+        ("Aon", num.to_string())
+    } else if let Some(sub_block_num) = gpio_block_num.strip_prefix("Emc") {
+        let (sub_block, num) = sub_block_num.split_at(2);
+        ("Emc", format!("{sub_block}_{num}"))
     } else {
-        let (a, b) = gpio_block.split_at(2);
+        let (a, b) = gpio_block_num.split_at(2);
         (a, b.to_string())
     };
 
     let gpio_name = format!("GPIO_{}_{}", gpio_block.to_uppercase(), num);
-    let daisy_ctl_pattern = format!("SELECT_{gpio_name}_ALT");
+    let daisy_ctl_prefix = format!("SELECT_{gpio_name}_ALT"); // Don't include trailing number in prefix
 
     let mux_enum = ir.enums.get(&mux_enum_pattern).unwrap();
 
+    // Daisy configurations for this pad
     let enums_for_pad: Vec<_> = ir
         .enums
         .iter()
@@ -137,15 +146,24 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
             let enum_variant = enumm
                 .variants
                 .iter()
-                .find(|v| v.name.starts_with(&daisy_ctl_pattern))?;
+                .find(|v| v.name.starts_with(&daisy_ctl_prefix))?;
 
-            let (fs_name, _fs) = ir.fieldsets.iter().find(|(_, fs)| {
-                let Some(field) = fs.fields.get(0) else {
-                    return false;
-                };
+            let (fs_name, _) = ir
+                .fieldsets
+                .iter()
+                .find(|(_, fs)| {
+                    let Some(field) = fs.fields.get(0) else {
+                        return false;
+                    };
 
-                field.enumm.as_ref() == Some(enum_name)
-            })?;
+                    if field.enumm.as_ref() == Some(enum_name) {
+                        assert_eq!(fs.fields.len(), 1, "Daisy must have 1 field");
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap();
 
             Some(Daisy {
                 fs_name: fs_name.to_string(),
@@ -155,6 +173,7 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
         })
         .collect();
 
+    // The alt modes and their required daisy configuration (if any) for this pad
     let alt_modes: Vec<_> = mux_enum
         .variants
         .iter()
@@ -183,30 +202,20 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
             let variant = Ident::new(&alt.mux_variant, Span::call_site());
 
             let enumm = daisy.enumm.split("::").last().unwrap();
-            let iomuxc_block = ir.blocks.get("iomuxc::Iomuxc").unwrap();
-            let iomuxc_aon_block = ir.blocks.get("iomuxc_aon::IomuxcAon").unwrap();
 
-            let (daisy_block, daisy_fs) = iomuxc_block
-                .items
-                .iter()
+            // Daisy configs are spread out over both blocks (wat?)
+            let (daisy_block, daisy_fs) = iomuxc
+                .clone()
                 .map(|item| ("IOMUXC", item))
-                .chain(
-                    iomuxc_aon_block
-                        .items
-                        .iter()
-                        .map(|item| ("IOMUXC_AON", item)),
-                )
-                .find_map(|(block, item)| match &item.inner {
-                    BlockItemInner::Register(register) => {
-                        if register.fieldset.as_ref().map(|v| v.as_str()) == Some(&daisy.fs_name) {
-                            Some((block, item.name.as_str()))
-                        } else {
-                            None
-                        }
+                .chain(iomuxc_aon.clone().map(|item| ("IOMUXC_AON", item)))
+                .find_map(|(block, (item_name, fieldset))| {
+                    if fieldset.as_ref().map(|v| v.as_str()) == Some(&daisy.fs_name) {
+                        Some((block, item_name.as_str()))
+                    } else {
+                        None
                     }
-                    BlockItemInner::Block(_) => None,
                 })
-                .expect(&daisy.fs_name);
+                .unwrap();
             let daisy_block = Ident::new(daisy_block, Span::call_site());
             let daisy_fs = Ident::new(daisy_fs, Span::call_site());
             let daisy_name = Ident::new(enumm, Span::call_site());
@@ -221,47 +230,41 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
         })
         .collect();
 
-    let set_pac_alt_mode = {
-        let iomuxc_mux_item_name = iomuxc_block
-            .items
-            .iter()
-            .find_map(|item| match &item.inner {
-                BlockItemInner::Register(register) => {
-                    if register.fieldset.as_ref().map(|v| v.as_str()) == Some(fs_name) {
-                        Some(item.name.clone())
-                    } else {
-                        None
-                    }
+    let set_alt_mode = {
+        let iomuxc_mux_item_name = iomux_for_alt
+            .clone()
+            .find_map(|(item_name, fieldset)| {
+                if fieldset.as_ref().map(|v| v.as_str()) == Some(fs_name) {
+                    Some(item_name.clone())
+                } else {
+                    None
                 }
-                BlockItemInner::Block(_) => None,
             })
             .unwrap();
 
         let item_name = Ident::new(&iomuxc_mux_item_name, Span::call_site());
 
         quote! {
-            #iomuxc_block_name.#item_name().modify(|w| w.set_mux_mode(mux_mode));
+            #iomux_for_alt_name.#item_name().modify(|w| w.set_mux_mode(mux_mode));
         }
     };
 
-    let alt_mode_body = if !match_arms.is_empty() {
+    let set_input_daisy = (!match_arms.is_empty()).then(|| {
         quote! {
-            #set_pac_alt_mode
             match mux_mode {
                 #(#match_arms)*
                 _ => {},
             }
         }
-    } else {
-        quote! { #set_pac_alt_mode }
-    };
+    });
 
     let gpio = Ident::new(struct_name, Span::call_site());
     let mux_enum = Ident::new(&mux_enum_base_name, Span::call_site());
     let output = quote::quote! {
         impl #gpio {
             fn set_alt_mode(mux_mode: #mux_enum) {
-                #alt_mode_body
+                #set_alt_mode
+                #set_input_daisy
             }
         }
     };
