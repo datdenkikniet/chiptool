@@ -139,7 +139,7 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
     let mux_enum = ir.enums.get(&mux_enum_pattern).unwrap();
 
     // Daisy configurations for this pad
-    let enums_for_pad: Vec<_> = ir
+    let daisies_for_pad: Vec<_> = ir
         .enums
         .iter()
         // Assume that one daisy enum (= daisy mux) could route multiple
@@ -186,7 +186,7 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
             let (alt, _) = variant.name.split_once("_").unwrap();
             let name = format!("SELECT_{gpio_name}_{alt}");
 
-            let daisy = enums_for_pad
+            let daisy = daisies_for_pad
                 .iter()
                 .find(|daisy| daisy.variant == name)
                 .cloned();
