@@ -123,6 +123,11 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
 
     let gpio_block_num = struct_name.strip_prefix("Gpio").unwrap();
 
+    // Skip Dummy pins.
+    if gpio_block_num.ends_with("Dummy") {
+        return;
+    }
+
     let (gpio_block, num) = if let Some(num) = gpio_block_num.strip_prefix("Aon") {
         ("Aon", num.to_string())
     } else if let Some(sub_block_num) = gpio_block_num.strip_prefix("Emc") {
@@ -267,7 +272,10 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
     let mux_enum = Ident::new(&mux_enum_base_name, Span::call_site());
     let output = quote::quote! {
         impl #gpio {
-            fn set_alt_mode(mux_mode: #mux_enum) {
+            /// Configure alternate mode.
+            #[allow(unused, reason = "only used for pins with peripheral impls")]
+            #[inline(always)]
+            pub(crate) fn set_alternate_mode(mux_mode: #mux_enum) {
                 #set_alt_mode
                 #set_input_daisy
             }
