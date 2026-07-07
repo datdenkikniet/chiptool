@@ -133,6 +133,9 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
     } else if let Some(sub_block_num) = gpio_block_num.strip_prefix("Emc") {
         let (sub_block, num) = sub_block_num.split_at(2);
         ("Emc", format!("{sub_block}_{num}"))
+    } else if let Some(sub_block_num) = gpio_block_num.strip_prefix("Sd") {
+        let (sub_block, num) = sub_block_num.split_at(2);
+        ("Sd", format!("{sub_block}_{num}"))
     } else {
         let (a, b) = gpio_block_num.split_at(2);
         (a, b.to_string())
@@ -239,6 +242,13 @@ fn for_one_mux(fs_name: &str, ir: &IR) {
             }
         })
         .collect();
+
+    if match_arms.is_empty() {
+        eprintln!(
+            "Found no input daisy for {}. That is probably wrong.",
+            struct_name
+        );
+    }
 
     let set_alt_mode = {
         let iomuxc_mux_item_name = iomux_for_alt
